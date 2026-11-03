@@ -1718,6 +1718,13 @@ private:
         // previous frame's fence instead and let the game prepare frame N+1 meanwhile (waiting
         // for this frame there cost 8-56 ms of every 34-105 ms frame, or never finished).
         // EDEN_NX2_FRAMES_AHEAD=1 always waits for the previous frame, =0 always for this one.
+        // The game's present interval (vblanks per frame) is in the high half of word 12.
+        const u32 present_interval = std::clamp<u32>((w[12] >> 16) & 0xff, 1, 4);
+        if (present_interval != m_present_interval) {
+            LOG_DEBUG(Service, "nx2:vi2 present interval {} -> {} (word 12 {:#x})",
+                      m_present_interval, present_interval, w[12]);
+            m_present_interval = present_interval;
+        }
         static const int frames_ahead = [] {
             const char* value = std::getenv("EDEN_NX2_FRAMES_AHEAD");
             return value == nullptr ? -1 : value[0] == '1' ? 1 : 0;
@@ -1768,16 +1775,30 @@ private:
                 m_stats.frame_us += frame;
                 m_stats.max_frame_us = (std::max)(m_stats.max_frame_us, frame);
                 m_stats.hitches += frame > 100'000 ? 1 : 0;
+                // One slow frame at 30 fps is a visible stutter: say whether the game waited on
+                // Eden's GPU thread (fence) or took long itself before presenting.
+                if (frame > 45'000 && m_hitch_logs < 2000) {
+                    ++m_hitch_logs;
+                    LOG_INFO(Service, "nx2:vi2 slow frame #{}: {} us, of which GPU fence {} us",
+                             m_presents, frame, to_us(m_last_fence_wait));
+                }
             }
             m_stats.last_present = entered;
+            m_last_fence_wait = waited - entered;
+            // Game time: each present advances the game by its interval in vblanks (MKW counts
+            // 1 or 2 a frame), so vblanks per second against 60 is the game's speed.
+            m_stats.vblanks += m_present_interval;
+            m_stats.double_frames += m_present_interval > 1 ? 1 : 0;
             if (++m_stats.presents == 600) {
+                const double seconds = static_cast<double>(m_stats.frame_us) / 1e6;
                 LOG_INFO(Service,
                          "nx2:vi2 last 600 presents: frame {} us (max {}, {} over 100 ms), "
                          "blocked on the GPU fence {} us (max {}), composite {} us, vblank "
-                         "pacing {} us",
+                         "pacing {} us; {} of them 2+ vblanks, game speed {:.0f}%",
                          m_stats.frame_us / 599, m_stats.max_frame_us, m_stats.hitches,
                          m_stats.fence_us / 600, m_stats.max_fence_us, m_stats.composite_us / 600,
-                         m_stats.pace_us / 600);
+                         m_stats.pace_us / 600, m_stats.double_frames,
+                         seconds > 0 ? 100.0 * m_stats.vblanks / (seconds * 60.0) : 0.0);
                 m_stats = {.last_present = entered};
             }
         }
@@ -1796,10 +1817,15 @@ private:
         long long frame_us{}, fence_us{}, composite_us{}, pace_us{}, max_fence_us{};
         long long max_frame_us{}, hitches{};
         u32 presents{};
+        u32 vblanks{};
+        u32 double_frames{};
         std::chrono::steady_clock::time_point last_present{};
     } m_stats{};
     u32 m_previous_fence_id{~0U}; // none yet (WaitForFrame ignores ids >= 192)
     u32 m_previous_fence_value{};
+    u32 m_present_interval{1};
+    u32 m_hitch_logs{};
+    std::chrono::steady_clock::duration m_last_fence_wait{};
 
     // The console flips one frame per 60 Hz vblank and keeps the rest queued, so a game can't
     // present faster than that. Every slot is reported free here: hold each present until the
@@ -1818,8 +1844,13 @@ private:
             const char* value = std::getenv("EDEN_NX2_SWAP_INTERVAL");
             return value ? static_cast<u32>(std::strtoul(value, nullptr, 10)) : 0U;
         }();
+        // With MKW's dynamic frame rate (mkw_dynamic_fps) the game times its own frames to pick
+        // 1 or 2 vblanks: holding a frame for 2 would keep it at 30 fps for good, so pace to
+        // every vblank and let the game catch up through its interval.
         const u32 swap_interval =
-            forced_interval != 0 ? forced_interval : std::clamp<u32>(timing >> 16, 1, 4);
+            forced_interval != 0 ? forced_interval
+            : Settings::values.mkw_dynamic_fps.GetValue() ? 1U
+                                                          : std::clamp<u32>(timing >> 16, 1, 4);
         const u32 refresh_rate = (timing & 0xffff) >= 30 && (timing & 0xffff) <= 240 ? timing & 0xffff : 60;
         if (timing != std::exchange(m_swap_word, timing)) {
             LOG_INFO(Service, "nx2:vi2 present #{} swap interval {} at {} Hz (word 12 = {:#x})",
