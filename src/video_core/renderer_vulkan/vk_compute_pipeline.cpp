@@ -10,6 +10,8 @@
 #include <boost/container/small_vector.hpp>
 #include <fmt/format.h>
 
+#include "video_core/nx2_passlog.h"
+#include "video_core/texture_cache/formatter.h"
 #include "video_core/renderer_vulkan/pipeline_helper.h"
 #include "video_core/renderer_vulkan/pipeline_statistics.h"
 #include "video_core/renderer_vulkan/vk_buffer_cache.h"
@@ -243,6 +245,16 @@ bool ComputePipeline::Configure(Tegra::Engines::KeplerCompute& kepler_compute,
         add_image(desc, desc.is_written);
     }
     texture_cache.FillImageViews(std::span(views.data(), views.size()), true);
+    if (VideoCommon::Nx2PassLog::active.load(std::memory_order_relaxed)) {
+        for (size_t i = 0; i < views.size(); ++i) {
+            if (!VideoCommon::Nx2PassLog::Take()) {
+                break;
+            }
+            const ImageView& view{texture_cache.GetImageView(views[i].id)};
+            LOG_INFO(Render_Vulkan, "passlog   view[{}]={}@{:#x}:{}x{}", i, view.format,
+                     view.gpu_addr, view.size.width, view.size.height);
+        }
+    }
 
     buffer_cache.UnbindComputeTextureBuffers();
     size_t index{};

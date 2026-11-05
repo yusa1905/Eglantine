@@ -13,6 +13,8 @@
 #include <boost/container/static_vector.hpp>
 #include <fmt/format.h>
 
+#include "video_core/nx2_passlog.h"
+#include "video_core/texture_cache/formatter.h"
 #include "video_core/renderer_vulkan/pipeline_helper.h"
 
 #include "common/bit_field.h"
@@ -492,6 +494,16 @@ bool GraphicsPipeline::ConfigureImpl(bool is_indexed) {
         Profile::Scope scope{Profile::Zone::FillImageViews};
         texture_cache.FillImageViews(std::span(views.data(), views.size()), false,
                                      Spec::has_images);
+    }
+    if (VideoCommon::Nx2PassLog::active.load(std::memory_order_relaxed)) {
+        for (size_t i = 0; i < views.size(); ++i) {
+            if (!VideoCommon::Nx2PassLog::Take()) {
+                break;
+            }
+            const ImageView& view{texture_cache.GetImageView(views[i].id)};
+            LOG_INFO(Render_Vulkan, "passlog   tex[{}]={}@{:#x}:{}x{}", i, view.format,
+                     view.gpu_addr, view.size.width, view.size.height);
+        }
     }
 
     if constexpr (Spec::has_texture_buffers || Spec::has_image_buffers) {

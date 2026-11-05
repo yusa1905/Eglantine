@@ -46,6 +46,9 @@
 #include "video_core/renderer_vulkan/vk_pipeline_cache.h"
 #include "video_core/renderer_vulkan/vk_query_cache.h"
 #include "video_core/renderer_vulkan/vk_rasterizer.h"
+#include "video_core/nx2_passlog.h"
+#include "video_core/surface.h"
+#include "video_core/texture_cache/formatter.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 #include "video_core/renderer_vulkan/vk_staging_buffer_pool.h"
 #include "video_core/renderer_vulkan/vk_state_tracker.h"
@@ -400,6 +403,14 @@ void RasterizerVulkan::PrepareDraw(bool is_indexed, Func&& draw_func) {
             }
         }
     }
+    if (VideoCommon::Nx2PassLog::Take()) {
+        const auto& hashes = pipeline->Key().unique_hashes;
+        const auto& draw_state = maxwell3d->draw_manager.draw_state;
+        LOG_INFO(Render_Vulkan, "passlog draw vs={:016x} ps={:016x} count={} inst={}{}",
+                 hashes[1] != 0 ? hashes[1] : hashes[0], hashes[5],
+                 is_indexed ? draw_state.index_buffer.count : draw_state.vertex_buffer.count,
+                 draw_state.instance_count, PassLogTargets(*maxwell3d));
+    }
     if (Profile::Scope scope{Profile::Zone::Configure}; !pipeline->Configure(is_indexed)) {
         report_failure("configure failed");
         return;
@@ -461,6 +472,32 @@ void RasterizerVulkan::PrepareDraw(bool is_indexed, Func&& draw_func) {
     }
 }
 
+
+namespace {
+// EDEN_NX2_PASSLOG (video_core/nx2_passlog.h): the colour and depth targets of the current draw.
+std::string PassLogTargets(const Tegra::Engines::Maxwell3D& maxwell3d) {
+    const auto& regs = maxwell3d.regs;
+    std::string out;
+    for (u32 i = 0; i < regs.rt_control.count; ++i) {
+        const auto& rt = regs.rt[regs.rt_control.Map(i)];
+        if (rt.Address() == 0) {
+            continue;
+        }
+        const auto format = VideoCore::Surface::TryPixelFormatFromRenderTargetFormat(rt.format);
+        out += fmt::format(" rt{}={}@{:#x}:{}x{}", i,
+                           format ? fmt::format("{}", *format)
+                                  : fmt::format("rtfmt{:#x}", static_cast<u32>(rt.format)),
+                           rt.Address(), rt.width, rt.height);
+    }
+    if (regs.zeta_enable) {
+        out += fmt::format(" z={}@{:#x}",
+                           VideoCore::Surface::PixelFormatFromDepthFormat(regs.zeta.format),
+                           regs.zeta.Address());
+    }
+    out += fmt::format(" blend0={} mask0={:#x}", regs.blend.enable[0], regs.color_mask[0].raw);
+    return out;
+}
+} // Anonymous namespace
 
 namespace {
 // EDEN_NX2_WINDOW_TRACE: describe clears and draws into screen-sized colour targets (debug aid).
@@ -834,6 +871,10 @@ void RasterizerVulkan::Clear(u32 layer_count) {
                  regs.clear_color[1], regs.clear_color[2], regs.clear_color[3]);
     }
     TraceWindowTarget(*maxwell3d, *gpu_memory, "clear", layer_count);
+    if (VideoCommon::Nx2PassLog::Take()) {
+        LOG_INFO(Render_Vulkan, "passlog clear surface={:#x}{}", maxwell3d->regs.clear_surface.raw,
+                 PassLogTargets(*maxwell3d));
+    }
     FlushWork();
     gpu_memory->FlushCaching();
 
@@ -1027,6 +1068,9 @@ void RasterizerVulkan::DispatchCompute() {
     if (!pipeline) {
         if (kepler_compute->IsNativeMode()) throw Shader::RuntimeError("Native compute pipeline unavailable");
         return;
+    }
+    if (VideoCommon::Nx2PassLog::Take()) {
+        LOG_INFO(Render_Vulkan, "passlog dispatch cs={:016x}", pipeline->ShaderHash());
     }
     std::scoped_lock lock{texture_cache.mutex, buffer_cache.mutex};
     // Command list pages the dispatch writes are copied for the split's front right after it.
@@ -1388,6 +1432,12 @@ void RasterizerVulkan::FlushCommands() {
 }
 
 void RasterizerVulkan::TickFrame() {
+    {
+        static u64 passlog_frame{};
+        if (VideoCommon::Nx2PassLog::OnFrame(++passlog_frame)) {
+            LOG_INFO(Render_Vulkan, "passlog frame {} begins", passlog_frame);
+        }
+    }
     draw_counter = 0;
     pipeline_cache.TickFrame();
     guest_descriptor_queue.TickFrame();
