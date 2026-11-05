@@ -57,6 +57,37 @@ namespace Vulkan {
 
 namespace {
 using Shader::Backend::SPIRV::EmitSPIRV;
+
+namespace {
+// NX2 HDR: replace a guest shader's generated SPIR-V with a file from
+// <eden>/shader_override/<unique_hash>.spv if it exists. Used for the MKW HDR tonemap.
+void ApplyShaderOverride(u64 unique_hash, std::vector<u32>& code) {
+    using namespace Common::FS;
+    static const auto dir = GetEdenPath(EdenPath::EdenDir) / "shader_override";
+    static const bool dir_exists = Exists(dir);
+    if (!dir_exists) {
+        return;
+    }
+    const auto path = dir / fmt::format("{:016x}.spv", unique_hash);
+    if (!Exists(path)) {
+        return;
+    }
+    IOFile file(path, FileAccessMode::Read, FileType::BinaryFile);
+    const u64 size = file.GetSize();
+    if (!file.IsOpen() || size == 0 || size % sizeof(u32) != 0) {
+        LOG_ERROR(Render_Vulkan, "shader_override: bad file {}", path.string());
+        return;
+    }
+    std::vector<u32> replacement(size / sizeof(u32));
+    if (file.ReadSpan(std::span<u32>(replacement)) != replacement.size()) {
+        LOG_ERROR(Render_Vulkan, "shader_override: read failed {}", path.string());
+        return;
+    }
+    LOG_INFO(Render_Vulkan, "shader_override: replaced {:016x} ({} words)", unique_hash,
+             replacement.size());
+    code = std::move(replacement);
+}
+} // Anonymous namespace
 using Shader::Maxwell::ConvertLegacyToGeneric;
 using Shader::Maxwell::GenerateGeometryPassthrough;
 using Shader::Maxwell::MergeDualVertexPrograms;
@@ -1185,7 +1216,8 @@ std::unique_ptr<GraphicsPipeline> PipelineCache::CreateGraphicsPipeline(
 
         const auto runtime_info{MakeRuntimeInfo(programs, key, program, previous_stage, device)};
         ConvertLegacyToGeneric(program, runtime_info);
-        const std::vector<u32> code{EmitSPIRV(profile, runtime_info, program, binding)};
+        std::vector<u32> code{EmitSPIRV(profile, runtime_info, program, binding)};
+        ApplyShaderOverride(key.unique_hashes[index], code);
         device.SaveShader(code);
         modules[stage_index] = BuildShader(device, code);
 

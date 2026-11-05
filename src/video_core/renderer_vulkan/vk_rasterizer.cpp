@@ -20,6 +20,7 @@
 #include <vector>
 
 #include <fmt/format.h>
+#include <fmt/ranges.h>
 
 #include "video_core/renderer_vulkan/renderer_vulkan.h"
 
@@ -436,6 +437,15 @@ void RasterizerVulkan::PrepareDraw(bool is_indexed, Func&& draw_func) {
                  hashes[1] != 0 ? hashes[1] : hashes[0], hashes[5],
                  is_indexed ? draw_state.index_buffer.count : draw_state.vertex_buffer.count,
                  draw_state.instance_count, PassLogTargets(*maxwell3d));
+        // NX2 HDR: dump fragment cbuf3 of the MKW tonemap pass (curve constants).
+        if (hashes[5] == 0xe43c4b68e728622eULL) {
+            const auto& cb = maxwell3d->state.shader_stages[4].const_buffers[3];
+            if (cb.enabled && cb.size >= 32 * sizeof(float)) {
+                std::array<float, 32> c{};
+                gpu_memory->ReadBlock(cb.address, c.data(), sizeof(c));
+                LOG_INFO(Render_Vulkan, "passlog   tonemap cb3 = {}", fmt::join(c, " "));
+            }
+        }
     }
     if (Profile::Scope scope{Profile::Zone::Configure}; !pipeline->Configure(is_indexed)) {
         report_failure("configure failed");
