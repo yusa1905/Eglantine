@@ -17,6 +17,7 @@
 #include <numeric>
 #include "common/cityhash.h"
 #include "common/scope_exit.h"
+#include "common/fs/file.h"
 #include "common/fs/fs.h"
 #include "common/fs/path_util.h"
 #include "common/thread_worker.h"
