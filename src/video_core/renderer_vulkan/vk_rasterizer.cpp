@@ -329,6 +329,32 @@ bool RasterizerVulkan::TryNx2IndirectReset() {
     return true;
 }
 
+namespace {
+// EDEN_NX2_PASSLOG (video_core/nx2_passlog.h): the colour and depth targets of the current draw.
+std::string PassLogTargets(const Tegra::Engines::Maxwell3D& maxwell3d) {
+    const auto& regs = maxwell3d.regs;
+    std::string out;
+    for (u32 i = 0; i < regs.rt_control.count; ++i) {
+        const auto& rt = regs.rt[regs.rt_control.Map(i)];
+        if (rt.Address() == 0) {
+            continue;
+        }
+        const auto format = VideoCore::Surface::TryPixelFormatFromRenderTargetFormat(rt.format);
+        out += fmt::format(" rt{}={}@{:#x}:{}x{}", i,
+                           format ? fmt::format("{}", *format)
+                                  : fmt::format("rtfmt{:#x}", static_cast<u32>(rt.format)),
+                           rt.Address(), rt.width, rt.height);
+    }
+    if (regs.zeta_enable) {
+        out += fmt::format(" z={}@{:#x}",
+                           VideoCore::Surface::PixelFormatFromDepthFormat(regs.zeta.format),
+                           regs.zeta.Address());
+    }
+    out += fmt::format(" blend0={} mask0={:#x}", regs.blend.enable[0], regs.color_mask[0].raw);
+    return out;
+}
+} // Anonymous namespace
+
 template <typename Func>
 void RasterizerVulkan::PrepareDraw(bool is_indexed, Func&& draw_func) {
 
@@ -473,31 +499,6 @@ void RasterizerVulkan::PrepareDraw(bool is_indexed, Func&& draw_func) {
 }
 
 
-namespace {
-// EDEN_NX2_PASSLOG (video_core/nx2_passlog.h): the colour and depth targets of the current draw.
-std::string PassLogTargets(const Tegra::Engines::Maxwell3D& maxwell3d) {
-    const auto& regs = maxwell3d.regs;
-    std::string out;
-    for (u32 i = 0; i < regs.rt_control.count; ++i) {
-        const auto& rt = regs.rt[regs.rt_control.Map(i)];
-        if (rt.Address() == 0) {
-            continue;
-        }
-        const auto format = VideoCore::Surface::TryPixelFormatFromRenderTargetFormat(rt.format);
-        out += fmt::format(" rt{}={}@{:#x}:{}x{}", i,
-                           format ? fmt::format("{}", *format)
-                                  : fmt::format("rtfmt{:#x}", static_cast<u32>(rt.format)),
-                           rt.Address(), rt.width, rt.height);
-    }
-    if (regs.zeta_enable) {
-        out += fmt::format(" z={}@{:#x}",
-                           VideoCore::Surface::PixelFormatFromDepthFormat(regs.zeta.format),
-                           regs.zeta.Address());
-    }
-    out += fmt::format(" blend0={} mask0={:#x}", regs.blend.enable[0], regs.color_mask[0].raw);
-    return out;
-}
-} // Anonymous namespace
 
 namespace {
 // EDEN_NX2_WINDOW_TRACE: describe clears and draws into screen-sized colour targets (debug aid).
