@@ -4,6 +4,7 @@
 // SPDX-FileCopyrightText: Copyright 2019 yuzu Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <fmt/ranges.h>
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -505,6 +506,23 @@ void RasterizerVulkan::PrepareDraw(bool is_indexed, Func&& draw_func) {
     if (!pipeline) {
         report_failure("no pipeline");
         return;
+    }
+    // HDR test (yusa1905 fork): EDEN_HDR_LOG=1 logs the fragment constant buffer 3 of Mario
+    // Kart World's tonemap pass (the tone curve parameters) every 600th draw.
+    static const bool hdr_log{std::getenv("EDEN_HDR_LOG") != nullptr};
+    if (hdr_log && pipeline->Key().unique_hashes[5] == 0xe43c4b68e728622eULL) {
+        static u32 hdr_draws{};
+        if (hdr_draws++ % 600 == 0) {
+            const auto& cb = maxwell3d->state.shader_stages[4].const_buffers[3];
+            if (cb.enabled && cb.size >= 32 * sizeof(float)) {
+                std::array<float, 32> values{};
+                gpu_memory->ReadBlock(cb.address, values.data(), sizeof(values));
+                LOG_INFO(Render_Vulkan, "hdr tonemap cb3 = {}", fmt::join(values, " "));
+            } else {
+                LOG_INFO(Render_Vulkan, "hdr tonemap cb3 unavailable (enabled={}, size={})",
+                         cb.enabled, cb.size);
+            }
+        }
     }
     if (!is_indexed && TryNx2IndirectReset()) {
         submitted = true;
