@@ -11,6 +11,10 @@
 #include "common/assert.h"
 #include "common/common_types.h"
 
+#include <array>
+#include <cstddef>
+
+#include "video_core/nx2_hdr.h"
 #include "video_core/host_shaders/present_area_frag_spv.h"
 #include "video_core/host_shaders/present_bicubic_frag_spv.h"
 #include "video_core/host_shaders/present_gaussian_frag_spv.h"
@@ -42,8 +46,23 @@ std::unique_ptr<WindowAdaptPass> MakeBilinear(const Device& device, VkFormat fra
 }
 
 std::unique_ptr<WindowAdaptPass> MakeHdrPassthrough(const Device& device, VkFormat frame_format) {
-    return std::make_unique<WindowAdaptPass>(device, frame_format, CreateBilinearSampler(device),
-        BuildShader(device, VULKAN_PRESENT_HDR_FRAG_SPV));
+    const auto params = VideoCommon::Nx2Hdr::GetParams();
+    const std::array<VkSpecializationMapEntry, 3> entries{{
+        {0, offsetof(VideoCommon::Nx2Hdr::Params, paper_white_nits), sizeof(float)},
+        {1, offsetof(VideoCommon::Nx2Hdr::Params, peak_nits), sizeof(float)},
+        {2, offsetof(VideoCommon::Nx2Hdr::Params, view_mode), sizeof(s32)},
+    }};
+    const VkSpecializationInfo specialization{
+        .mapEntryCount = static_cast<u32>(entries.size()),
+        .pMapEntries = entries.data(),
+        .dataSize = sizeof(params),
+        .pData = &params,
+    };
+    SetPresentFragmentSpecialization(&specialization);
+    auto pass = std::make_unique<WindowAdaptPass>(device, frame_format,
+        CreateBilinearSampler(device), BuildShader(device, VULKAN_PRESENT_HDR_FRAG_SPV));
+    SetPresentFragmentSpecialization(nullptr);
+    return pass;
 }
 
 std::unique_ptr<WindowAdaptPass> MakeSpline1(const Device& device, VkFormat frame_format) {

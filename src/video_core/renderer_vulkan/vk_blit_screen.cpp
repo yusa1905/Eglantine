@@ -9,6 +9,8 @@
 
 #include <vulkan/vulkan_core.h>
 #include "common/settings.h"
+#include "common/logging.h"
+#include "video_core/nx2_hdr.h"
 #include "video_core/framebuffer_config.h"
 #include "video_core/present.h"
 #include "video_core/renderer_vulkan/present/filters.h"
@@ -131,6 +133,12 @@ void BlitScreen::DrawToFrame(const Device& device, RasterizerVulkan& rasterizer,
         resource_update_required = true;
         presentation_recreate_required = true;
         swapchain_view_format = current_swapchain_view_format;
+    }
+
+    // HDR test: F10 cycles HDR / SDR / split and re-reads hdr_settings.txt (see nx2_hdr.h).
+    if (swapchain_view_format == VK_FORMAT_R16G16B16A16_SFLOAT && VideoCommon::Nx2Hdr::PollKeys()) {
+        resource_update_required = true;
+        presentation_recreate_required = true;
     }
 
     const bool storage_required = Settings::values.frame_gen.GetValue();

@@ -396,6 +396,14 @@ vk::PipelineLayout CreateWrappedPipelineLayout(const Device& device,
     });
 }
 
+namespace {
+const VkSpecializationInfo* present_fragment_specialization = nullptr;
+}
+
+void SetPresentFragmentSpecialization(const VkSpecializationInfo* info) {
+    present_fragment_specialization = info;
+}
+
 static vk::Pipeline CreateWrappedPipelineImpl(
     const Device& device, vk::RenderPass& renderpass, vk::PipelineLayout& layout,
     std::tuple<vk::ShaderModule&, vk::ShaderModule&> shaders,
@@ -417,7 +425,7 @@ static vk::Pipeline CreateWrappedPipelineImpl(
             .stage = VK_SHADER_STAGE_FRAGMENT_BIT,
             .module = *std::get<1>(shaders),
             .pName = "main",
-            .pSpecializationInfo = nullptr,
+            .pSpecializationInfo = present_fragment_specialization,
         },
     }};
 

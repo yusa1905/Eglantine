@@ -47,6 +47,8 @@ vk::DescriptorSets CreateWrappedDescriptorSets(vk::DescriptorPool& pool,
                                                vk::Span<VkDescriptorSetLayout> layouts);
 vk::PipelineLayout CreateWrappedPipelineLayout(const Device& device,
                                                vk::DescriptorSetLayout& layout);
+/// HDR test: specialization info for the fragment stage of pipelines created while it is set.
+void SetPresentFragmentSpecialization(const VkSpecializationInfo* info);
 vk::Pipeline CreateWrappedPipeline(const Device& device, vk::RenderPass& renderpass,
                                    vk::PipelineLayout& layout,
                                    std::tuple<vk::ShaderModule&, vk::ShaderModule&> shaders);
