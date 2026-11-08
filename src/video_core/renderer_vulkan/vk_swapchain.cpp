@@ -16,6 +16,7 @@
 #include "common/logging.h"
 #include "common/settings.h"
 #include "common/settings_enums.h"
+#include "video_core/nx2_hdr.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 #include "video_core/renderer_vulkan/vk_swapchain.h"
 #include "video_core/vulkan_common/vk_enum_string_helper.h"
@@ -28,6 +29,21 @@ namespace Vulkan {
 namespace {
 
 VkSurfaceFormatKHR ChooseSwapSurfaceFormat(vk::Span<VkSurfaceFormatKHR> formats) {
+    if (VideoCommon::Nx2Hdr::Enabled()) {
+        for (const auto& format : formats) {
+            LOG_INFO(Render_Vulkan, "HDR test: surface offers format {} colour space {}",
+                     static_cast<int>(format.format), static_cast<int>(format.colorSpace));
+        }
+        const auto hdr = std::find_if(formats.begin(), formats.end(), [](const auto& format) {
+            return format.format == VK_FORMAT_R16G16B16A16_SFLOAT &&
+                   format.colorSpace == VK_COLOR_SPACE_EXTENDED_SRGB_LINEAR_EXT;
+        });
+        if (hdr != formats.end()) {
+            LOG_INFO(Render_Vulkan, "HDR test: using an scRGB (FP16) swapchain");
+            return *hdr;
+        }
+        LOG_WARNING(Render_Vulkan, "HDR test: no scRGB swapchain format (is Windows HDR on?)");
+    }
     if (formats.size() == 1 && formats[0].format == VK_FORMAT_UNDEFINED) {
         VkSurfaceFormatKHR format;
         format.format = VK_FORMAT_B8G8R8A8_UNORM;
@@ -339,7 +355,8 @@ void Swapchain::CreateSwapchain(const VkSurfaceCapabilitiesKHR& capabilities) {
         .viewFormatCount = static_cast<u32>(view_formats.size()),
         .pViewFormats = view_formats.data(),
     };
-    if (device.IsKhrSwapchainMutableFormatEnabled()) {
+    if (device.IsKhrSwapchainMutableFormatEnabled() &&
+        surface_format.format != VK_FORMAT_R16G16B16A16_SFLOAT) {
         format_list.pNext = std::exchange(swapchain_ci.pNext, &format_list);
         swapchain_ci.flags |= VK_SWAPCHAIN_CREATE_MUTABLE_FORMAT_BIT_KHR;
     }
@@ -359,6 +376,10 @@ void Swapchain::CreateSwapchain(const VkSurfaceCapabilitiesKHR& capabilities) {
 #else
     image_view_format = VK_FORMAT_B8G8R8A8_UNORM;
 #endif
+    VideoCommon::Nx2Hdr::swapchain_hdr = surface_format.format == VK_FORMAT_R16G16B16A16_SFLOAT;
+    if (VideoCommon::Nx2Hdr::swapchain_hdr) {
+        image_view_format = VK_FORMAT_R16G16B16A16_SFLOAT;
+    }
 }
 
 void Swapchain::CreateSemaphores() {

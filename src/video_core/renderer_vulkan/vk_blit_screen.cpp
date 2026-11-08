@@ -42,6 +42,12 @@ void BlitScreen::SetWindowAdaptPass(const Device& device) {
     layers.clear();
     scaling_filter = filters.get_scaling_filter();
 
+    if (swapchain_view_format == VK_FORMAT_R16G16B16A16_SFLOAT) {
+        // HDR test: linear float source scaled to paper white on an scRGB swapchain.
+        window_adapt = MakeHdrPassthrough(device, swapchain_view_format);
+        return;
+    }
+
     switch (scaling_filter) {
     case Settings::ScalingFilter::NearestNeighbor:
         window_adapt = MakeNearestNeighbor(device, swapchain_view_format);

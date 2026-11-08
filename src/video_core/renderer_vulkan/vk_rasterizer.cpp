@@ -26,6 +26,7 @@
 #include <boost/container/small_vector.hpp>
 #include <fmt/format.h>
 
+#include "video_core/nx2_hdr.h"
 #include "video_core/renderer_vulkan/renderer_vulkan.h"
 
 #include "common/assert.h"
@@ -1920,8 +1921,25 @@ std::optional<FramebufferTextureInfo> RasterizerVulkan::AccelerateDisplay(
         return {};
     }
     std::scoped_lock lock{texture_cache.mutex};
-    const auto [image_view, scaled] =
+    auto [image_view, scaled] =
         texture_cache.TryFindFramebufferImageView(config, framebuffer_addr);
+    // HDR test: show the float buffer the game's final copy read instead of the 8-bit result.
+    if (image_view && VideoCommon::Nx2Hdr::Enabled() && VideoCommon::Nx2Hdr::swapchain_hdr) {
+        const u32 slot = VideoCommon::Nx2Hdr::source_view.load();
+        if (slot != 0xffffffffU) {
+            auto& hdr_view = texture_cache.GetImageView(VideoCommon::ImageViewId{slot});
+            static bool logged{};
+            if (hdr_view.format == VideoCore::Surface::PixelFormat::B10G11R11_FLOAT &&
+                hdr_view.size.width == image_view->size.width &&
+                hdr_view.size.height == image_view->size.height) {
+                if (!std::exchange(logged, true)) {
+                    LOG_INFO(HW_GPU, "HDR test: presenting the float buffer ({}x{})",
+                             hdr_view.size.width, hdr_view.size.height);
+                }
+                image_view = &hdr_view;
+            }
+        }
+    }
     static u32 display_trace_count{};
     static const bool frame_capture = std::getenv("EDEN_NATIVE_FRAME_CAPTURE") != nullptr;
     if (frame_capture && display_trace_count++ < 64) {

@@ -13,6 +13,7 @@
 #include <boost/container/static_vector.hpp>
 #include <fmt/format.h>
 
+#include "video_core/nx2_hdr.h"
 #include "video_core/renderer_vulkan/pipeline_helper.h"
 
 #include "common/bit_field.h"
@@ -510,6 +511,28 @@ bool GraphicsPipeline::ConfigureImpl(bool is_indexed) {
         Profile::Scope scope{Profile::Zone::FillImageViews};
         texture_cache.FillImageViews(std::span(views.data(), views.size()), false,
                                      Spec::has_images);
+    }
+    // HDR test: remember the float buffer MKW's final copy reads (its first fragment texture).
+    if (VideoCommon::Nx2Hdr::Enabled() &&
+        key.unique_hashes[5] == VideoCommon::Nx2Hdr::FinalCopyShader) {
+        size_t view_index{};
+        for (size_t stage = 0; stage < Spec::enabled_stages.size(); ++stage) {
+            if (!Spec::enabled_stages[stage]) {
+                continue;
+            }
+            const Shader::Info& info{stage_infos[stage]};
+            view_index += Shader::NumDescriptors(info.texture_buffer_descriptors);
+            view_index += Shader::NumDescriptors(info.image_buffer_descriptors);
+            const u32 textures = Shader::NumDescriptors(info.texture_descriptors);
+            if (stage == 4) {
+                if (textures > 0 && view_index < views.size()) {
+                    VideoCommon::Nx2Hdr::source_view = views[view_index].id.index;
+                }
+                break;
+            }
+            view_index += textures;
+            view_index += Shader::NumDescriptors(info.image_descriptors);
+        }
     }
     if (RecordingSampledTextures()) {
         sampled_images.clear();

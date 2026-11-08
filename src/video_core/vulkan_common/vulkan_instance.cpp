@@ -85,6 +85,10 @@ namespace {
     if (AreExtensionsSupported(dld, properties, std::array{VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME}))
         extensions.push_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
 #endif
+    // HDR test: scRGB / HDR10 swapchain colour spaces.
+    if (window_type != Core::Frontend::WindowSystemType::Headless &&
+        AreExtensionsSupported(dld, properties, std::array{VK_EXT_SWAPCHAIN_COLOR_SPACE_EXTENSION_NAME}))
+        extensions.push_back(VK_EXT_SWAPCHAIN_COLOR_SPACE_EXTENSION_NAME);
     if (enable_validation && AreExtensionsSupported(dld, properties, std::array{VK_EXT_DEBUG_UTILS_EXTENSION_NAME}))
         extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
 #ifdef EGLANTINE_STREAMLINE
